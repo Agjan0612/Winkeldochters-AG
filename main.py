@@ -264,7 +264,7 @@ analyse_bestand_1 = analyse_bestand.loc[voorraad_winkeldochter]
 
 
 
-# We hebben nu de verstrekkingen bij de andere apotheken in kaart... nu is het zaak om het optimaal bestellen toe te voegen aan de mix.
+# We hebben nu de verstrekkingen bij de andere apotheken in kaart... nu is het zaak om OPTIMAAL BESTELLEN TOE TE VOEGEN AAN DE MIX
 # converteer uitverkoop advies type naar string
 optimaal_bestel_advies['Uitverk. advies'] = optimaal_bestel_advies['Uitverk. advies'].astype(str)
 # alleen uitverkoop-advies - ja
@@ -345,6 +345,15 @@ app.layout = dbc.Container([
        dbc.Row([dcc.RadioItems(id='apotheek', options=recept_ag['apotheek'].unique(), value='helpman', inline=True)]),
        dbc.Row([html.H4('Winkeldochters geselecteerde apotheek')]),
        dbc.Row([html.Div(id='winkeldochters')]),
+       dbc.Row([
+              dbc.Col([], width=4),
+              dbc.Col([], width=5),
+              dbc.Col([
+                     dbc.Button(id='download',children="Download xlsx", color="success", className="me-1"),
+                     dcc.Download(id='download winkeldochters')
+              ], width=3)
+       ]),
+
        dbc.Row([html.H4('Zoek CF verstrekkingen op ZI-nummer')]),
        dbc.Row([
               dbc.Col([dcc.Input(id='ZI invoer', type='number', placeholder='Voer ZI in')], width=3),
@@ -354,6 +363,8 @@ app.layout = dbc.Container([
        dbc.Row([html.Div(id='CF verstrekkingen')]),
 ])
 
+
+# Callback voor het tonen van de winkeldochters van de geselecteerde apotheek
 @callback(
          Output('winkeldochters', 'children'),
          Input('apotheek', 'value')
@@ -554,10 +565,218 @@ def winkeldochters_apotheek(apotheek):
        wd_grid = dag.AgGrid(
               rowData=winkeldochters_compleet.to_dict('records'),
               columnDefs=[{'field': i } for i in winkeldochters_compleet.columns],
+              dashGridOptions={'enableCellTextSelection':'True'}
        )
        return wd_grid
 
+@callback(
+       Output('download winkeldochters', 'data'),
+       Output('download', 'n_clicks'),
+       Input('download', 'n_clicks'),
+       Input('apotheek', 'value')
 
+)
+def download_winkeldochters(n_clicks, apotheek):
+
+       if not n_clicks:
+              raise PreventUpdate
+       # STAP 2: Overzicht maken van de verstrekkingen via ladekast en CF van iedere apotheek
+
+       # zorg ervoor dat je een aantal producten excludeert (zorg, lsp, dienst-recepten en distributierecepten)
+
+       # filters voor exclusie
+
+       verstrekkingen = recept_ag.copy()
+
+       geen_zorgregels = (verstrekkingen['ReceptHerkomst'] != 'Z')
+       geen_LSP = (verstrekkingen['sdMedewerkerCode'] != 'LSP')
+       geen_dienst_recepten = (verstrekkingen['ReceptHerkomst'] != 'DIENST')
+       geen_distributie = (verstrekkingen['ReceptHerkomst'] != 'D')
+       geen_cf = (verstrekkingen['cf'] == 'N')
+       alleen_cf = (verstrekkingen['cf'] == 'J')
+
+       # datumrange van zoeken vastleggen: 4 maanden korter dan de max waarde van het dataframe
+
+       # omzetten naar een datetime kolom
+       verstrekkingen['ddDatumRecept'] = pd.to_datetime(verstrekkingen['ddDatumRecept'])
+
+       # bekijk wat de max datum is van het geimporteerde dataframe
+       meest_recente_datum = verstrekkingen['ddDatumRecept'].max()
+
+       # bereken de begindatum van meten met onderstaande functie --> 4 maanden in het verleden
+       begin_datum = (meest_recente_datum - pd.DateOffset(months=4))
+
+       # stel het dataframe tijdsfilter vast voor meetperiode
+       datum_range = (verstrekkingen['ddDatumRecept'] >= begin_datum)
+
+       # ======================================================================================================================================================
+       # Dataframe met LADEKAST VERSTREKKINGEN
+       verstrekkingen_1_zonder_cf = verstrekkingen.loc[
+              geen_zorgregels & geen_LSP & geen_dienst_recepten & geen_distributie & geen_cf & datum_range]
+
+       # Dataframe met CF VERSTREKKINGEN
+       verstrekkingen_1_met_cf = verstrekkingen.loc[
+              geen_zorgregels & geen_LSP & geen_dienst_recepten & geen_distributie & alleen_cf & datum_range]
+
+       # ======================================================================================================================================================
+
+       # pad 1: alleen verstrekkingen vanuit de ladekast gaan tellen per apotheek per zi als totaal
+       hanzeplein_lade = (verstrekkingen_1_zonder_cf['apotheek'] == 'hanzeplein')
+       oosterpoort_lade = (verstrekkingen_1_zonder_cf['apotheek'] == 'oosterpoort')
+       helpman_lade = (verstrekkingen_1_zonder_cf['apotheek'] == 'helpman')
+       wiljes_lade = (verstrekkingen_1_zonder_cf['apotheek'] == 'wiljes')
+       oosterhaar_lade = (verstrekkingen_1_zonder_cf['apotheek'] == 'oosterhaar')
+       musselpark_lade = (verstrekkingen_1_zonder_cf['apotheek'] == 'musselpark')
+
+       # hanzeplein
+       verstrekkingen_1_zonder_cf_hanzeplein = verstrekkingen_1_zonder_cf.loc[hanzeplein_lade]
+       verstrekkingen_1_zonder_cf_hanzeplein_eenheden = verstrekkingen_1_zonder_cf_hanzeplein.groupby(by=['ndATKODE'])[
+              'ndAantal'].sum().to_frame('eenheden verstrekt hanzeplein').reset_index()
+
+       # oosterpoort
+       verstrekkingen_1_zonder_cf_oosterpoort = verstrekkingen_1_zonder_cf.loc[oosterpoort_lade]
+       verstrekkingen_1_zonder_cf_oosterpoort_eenheden = \
+       verstrekkingen_1_zonder_cf_oosterpoort.groupby(by=['ndATKODE'])['ndAantal'].sum().to_frame(
+              'eenheden verstrekt oosterpoort').reset_index()
+
+       # helpman
+       verstrekkingen_1_zonder_cf_helpman = verstrekkingen_1_zonder_cf.loc[helpman_lade]
+       verstrekkingen_1_zonder_cf_helpman_eenheden = verstrekkingen_1_zonder_cf_helpman.groupby(by=['ndATKODE'])[
+              'ndAantal'].sum().to_frame('eenheden verstrekt helpman').reset_index()
+
+       # wiljes
+       verstrekkingen_1_zonder_cf_wiljes = verstrekkingen_1_zonder_cf.loc[wiljes_lade]
+       verstrekkingen_1_zonder_cf_wiljes_eenheden = verstrekkingen_1_zonder_cf_wiljes.groupby(by=['ndATKODE'])[
+              'ndAantal'].sum().to_frame('eenheden verstrekt wiljes').reset_index()
+
+       # oosterhaar
+       verstrekkingen_1_zonder_cf_oosterhaar = verstrekkingen_1_zonder_cf.loc[oosterhaar_lade]
+       verstrekkingen_1_zonder_cf_oosterhaar_eenheden = verstrekkingen_1_zonder_cf_oosterhaar.groupby(by=['ndATKODE'])[
+              'ndAantal'].sum().to_frame('eenheden verstrekt oosterhaar').reset_index()
+
+       # musselpark
+       verstrekkingen_1_zonder_cf_musselpark = verstrekkingen_1_zonder_cf.loc[musselpark_lade]
+       verstrekkingen_1_zonder_cf_musselpark_eenheden = verstrekkingen_1_zonder_cf_musselpark.groupby(by=['ndATKODE'])[
+              'ndAantal'].sum().to_frame('eenheden verstrekt musselpark').reset_index()
+
+       # bovenstaande dataframes samenvoegen tot één lange rij
+       # eerst paartjes van twee
+       hzp_op_lk = verstrekkingen_1_zonder_cf_hanzeplein_eenheden.merge(
+              verstrekkingen_1_zonder_cf_oosterpoort_eenheden[['ndATKODE', 'eenheden verstrekt oosterpoort']],
+              how='left')
+       hlp_wil_lk = verstrekkingen_1_zonder_cf_helpman_eenheden.merge(
+              verstrekkingen_1_zonder_cf_wiljes_eenheden[['ndATKODE', 'eenheden verstrekt wiljes']], how='left')
+       oh_mp_lk = verstrekkingen_1_zonder_cf_oosterhaar_eenheden.merge(
+              verstrekkingen_1_zonder_cf_musselpark_eenheden[['ndATKODE', 'eenheden verstrekt musselpark']], how='left')
+
+       # 1+2 en 3+4
+       hzp_op_hlp_wil_lk = hzp_op_lk.merge(
+              hlp_wil_lk[['ndATKODE', 'eenheden verstrekt helpman', 'eenheden verstrekt wiljes']], how='left')
+       # 1, 2, 3, 4 + 5 en 6
+       hzp_op_hlp_wil_oh_mp = hzp_op_hlp_wil_lk.merge(
+              oh_mp_lk[['ndATKODE', 'eenheden verstrekt oosterhaar', 'eenheden verstrekt musselpark']], how='left')
+
+       # Hernoem de kolommen tot iets wat goed te lezen is.
+       hzp_op_hlp_wil_oh_mp.columns = ['ZI', 'hanzeplein', 'oosterpoort', 'helpman', 'wiljes', 'oosterhaar',
+                                       'musselpark']
+
+       # Vervang NaN door 0
+       hzp_op_hlp_wil_oh_mp['hanzeplein'] = (hzp_op_hlp_wil_oh_mp['hanzeplein'].replace(np.nan, 0, regex=True)).astype(
+              int)
+       hzp_op_hlp_wil_oh_mp['oosterpoort'] = (
+              hzp_op_hlp_wil_oh_mp['oosterpoort'].replace(np.nan, 0, regex=True)).astype(int)
+       hzp_op_hlp_wil_oh_mp['helpman'] = (hzp_op_hlp_wil_oh_mp['helpman'].replace(np.nan, 0, regex=True)).astype(int)
+       hzp_op_hlp_wil_oh_mp['wiljes'] = (hzp_op_hlp_wil_oh_mp['wiljes'].replace(np.nan, 0, regex=True)).astype(int)
+       hzp_op_hlp_wil_oh_mp['oosterhaar'] = (hzp_op_hlp_wil_oh_mp['oosterhaar'].replace(np.nan, 0, regex=True)).astype(
+              int)
+       hzp_op_hlp_wil_oh_mp['musselpark'] = (hzp_op_hlp_wil_oh_mp['musselpark'].replace(np.nan, 0, regex=True)).astype(
+              int)
+
+       # pad 2: ALLEEN VERSTREKKINGEN VANUIT DE CENTRAL FILLING VOOR ALLE APOTHEKEN
+
+       verstrekkingen_cf = verstrekkingen_1_met_cf.groupby(by=['ndATKODE', 'apotheek'])['ndAantal'].sum().to_frame(
+              'eenheden verstrekt CF').reset_index()
+
+       # ======================================================================================================================================================
+       eenheden_verstrekt = hzp_op_hlp_wil_oh_mp  # overzicht van de eenheden die de afgelopen 4 maanden verstrekt zijn.
+       # ======================================================================================================================================================
+
+       # ======================================================================================================================================================
+       Apotheek_analyse = 'helpman'  # Filter voor apotheek
+       # ======================================================================================================================================================
+
+       # selecteer het assortiment van de apotheek dat je wilt analyseren
+       analyse_assortiment = assortiment_ag.copy()
+
+       # selecteer het assortiment dat je wilt beoordelen van de specifieke apotheek
+       apotheek_keuze = (analyse_assortiment['apotheek'] == Apotheek_analyse)
+
+       # selecteer de apotheek waarvan je de CF verstrekkingen wilt bekijken voor de winkeldochters
+       apotheek_keuze_cf = (verstrekkingen_cf['apotheek'] == Apotheek_analyse)
+
+       # maak het dataframe van de CF verstrekkingen klaar
+       verstrekkingen_cf_apotheek_analyse = verstrekkingen_cf.loc[apotheek_keuze_cf]
+
+       # filter het assortiment van de te analyseren apotheek uit de bult
+       analyse_assortiment_apotheek = analyse_assortiment.loc[apotheek_keuze]
+
+       analyse_assortiment_apotheek['voorraadwaarde'] = (
+                      (analyse_assortiment_apotheek['voorraadtotaal'] / analyse_assortiment_apotheek['inkhvh']) *
+                      analyse_assortiment_apotheek['inkprijs']).astype(int)
+
+       # maak het filter voor de verstrekkingen van de apotheek die je op 0 wilt hebben staan
+       eenheden_verstrekt_apotheek_selectie = (eenheden_verstrekt[Apotheek_analyse] == 0)
+
+       # filter het verstrekkingsdataframe
+       eenheden_analyse = eenheden_verstrekt.loc[eenheden_verstrekt_apotheek_selectie]
+
+       analyse_bestand = eenheden_analyse.merge(analyse_assortiment_apotheek[['zinummer', 'artikelnaam',
+                                                                              'inkhvh', 'eh', 'voorraadminimum',
+                                                                              'voorraadmaximum', 'locatie1',
+                                                                              'voorraadtotaal', 'inkprijs', 'prkode',
+                                                                              'voorraadwaarde']], how='left',
+                                                left_on='ZI', right_on='zinummer').drop(columns='zinummer')
+
+       voorraad_winkeldochter = (analyse_bestand['voorraadtotaal'] > 0)
+
+       analyse_bestand_1 = analyse_bestand.loc[voorraad_winkeldochter]
+
+       # We hebben nu de verstrekkingen bij de andere apotheken in kaart... nu is het zaak om OPTIMAAL BESTELLEN TOE TE VOEGEN AAN DE MIX
+       # converteer uitverkoop advies type naar string
+       optimaal_bestel_advies['Uitverk. advies'] = optimaal_bestel_advies['Uitverk. advies'].astype(str)
+       # alleen uitverkoop-advies - ja
+       alleen_uitverkopen = (optimaal_bestel_advies['Uitverk. advies'] == 'True')
+       # filter dataframe zodat alleen de uitverkoop-advies artikelen naar boven komen.
+       optimaal_bestel_advies_winkeldochters = optimaal_bestel_advies.loc[alleen_uitverkopen]
+
+       # maak het OB dataframe kleiner zodat het beter leesbaar is
+       optimaal_bestel_advies_winkeldochters_1 = optimaal_bestel_advies_winkeldochters[
+              ['PRK Code', 'ZI', 'Artikelomschrijving', 'Inhoud', 'Eenheid', 'Uitverk. advies']]
+
+       # merge deze nu met het analyse bestand
+       wd_bestand = analyse_bestand_1.merge(
+              optimaal_bestel_advies_winkeldochters_1[['ZI', 'Artikelomschrijving', 'Uitverk. advies']], how='inner',
+              on='ZI')
+
+       wd_bestand_1 = wd_bestand[['ZI', 'prkode', 'artikelnaam', 'inkhvh', 'eh', 'voorraadminimum',
+                                  'voorraadmaximum', 'voorraadtotaal', 'locatie1', 'inkprijs', 'voorraadwaarde',
+                                  'Uitverk. advies', 'hanzeplein', 'oosterpoort', 'helpman', 'wiljes', 'oosterhaar',
+                                  'musselpark']]
+
+       # merge nu als laatste stap de CF verstrekkingen
+
+       winkeldochters_compleet = wd_bestand_1.merge(
+              verstrekkingen_cf_apotheek_analyse[['ndATKODE', 'eenheden verstrekt CF']], how='left', left_on='ZI',
+              right_on='ndATKODE').drop(columns='ndATKODE')
+
+       winkeldochters_compleet['eenheden verstrekt CF'] = (
+              winkeldochters_compleet['eenheden verstrekt CF'].replace(np.nan, 0, regex=True)).astype(int)
+       n_clicks = None
+
+       return dcc.send_data_frame(winkeldochters_compleet.to_excel, "winkeldochters.xlsx"), n_clicks
+
+
+# Callback voor de ZI zoeker van de apotheek die je geselecteerd hebt
 @callback(
             Output('CF verstrekkingen', 'children'),
             Input('apotheek', 'value'),
@@ -605,6 +824,7 @@ def zoek_CF_verstrekkingen(apotheek, zi):
        CF_grid = dag.AgGrid(
                 rowData=zoek_CF_verstrekkingen_3.to_dict('records'),
                 columnDefs=[{'field': i } for i in zoek_CF_verstrekkingen_3.columns],
+                dashGridOptions={'enableCellTextSelection':'True'}
          )
        return CF_grid
 
