@@ -105,14 +105,31 @@ assortiment_musselpark['apotheek'] = 'musselpark'
 # samenvoegen van de assortiment dataframes tot een dataframe
 assortiment_ag = pd.concat([assortiment_hanzeplein, assortiment_oosterpoort, assortiment_helpman, assortiment_wiljes, assortiment_oosterhaar, assortiment_musselpark])
 
-# Inlezen Optimaal bestellen dataframe van de betreffende apotheek
-optimaal_bestel_advies = pd.read_excel('OB.xlsx')
+# Inlezen Optimaal bestellen dataframes van de apotheken
+OB_helpman = pd.read_excel('helpman_OB.xlsx')
+OB_hanzeplein = pd.read_excel('hanzeplein_OB.xlsx')
+OB_oosterpoort = pd.read_excel('oosterpoort_OB.xlsx')
+OB_wiljes = pd.read_excel('wiljes_OB.xlsx')
+OB_oosterhaar = pd.read_excel('oosterhaar_OB.xlsx')
+OB_musselpark = pd.read_excel('musselpark_OB.xlsx')
+
+# toevoegen van kolom 'apotheek' aan Optimaal bestellen advies
+OB_helpman['apotheek'] = 'helpman'
+OB_hanzeplein['apotheek'] = 'hanzeplein'
+OB_oosterpoort['apotheek'] = 'oosterpoort'
+OB_wiljes['apotheek'] = 'wiljes'
+OB_oosterhaar['apotheek'] = 'oosterhaar'
+OB_musselpark['apotheek'] = 'musselpark'
+
+# samenvoegen van de Optimaal Bestellen dataframes tot één dataframe
+optimaal_bestel_advies_ag = pd.concat([OB_helpman, OB_hanzeplein, OB_oosterpoort, OB_wiljes, OB_oosterhaar, OB_musselpark])
+
 
 
 # Overzicht van de ingelezen dataframes
 recept_ag               # Receptverwerking van alle apotheken binnen de AG
 assortiment_ag          # Assortimenten van alle AG apotheken
-optimaal_bestel_advies  # Optimaal Besteladvies van apotheek die je wilt bekijken
+optimaal_bestel_advies_ag  # Optimaal Besteladvies van apotheek die je wilt bekijken
 
 
 # STAP 2: Overzicht maken van de verstrekkingen via ladekast en CF van iedere apotheek
@@ -242,6 +259,7 @@ verstrekkingen_cf_apotheek_analyse = verstrekkingen_cf.loc[apotheek_keuze_cf]
 # filter het assortiment van de te analyseren apotheek uit de bult
 analyse_assortiment_apotheek = analyse_assortiment.loc[apotheek_keuze]
 
+# bereken de voorraadwaarde van iedere winkeldochter
 analyse_assortiment_apotheek['voorraadwaarde'] = ((analyse_assortiment_apotheek['voorraadtotaal']/analyse_assortiment_apotheek['inkhvh'])*analyse_assortiment_apotheek['inkprijs']).astype(int)
 
 
@@ -265,6 +283,14 @@ analyse_bestand_1 = analyse_bestand.loc[voorraad_winkeldochter]
 
 
 # We hebben nu de verstrekkingen bij de andere apotheken in kaart... nu is het zaak om OPTIMAAL BESTELLEN TOE TE VOEGEN AAN DE MIX
+
+# Zorg dat je eerst verder werkt met het juiste optimaal bestel advies door de apotheek te filteren die je geselecteerd hebt
+
+OB_apotheek_selectie = (optimaal_bestel_advies_ag['apotheek'] == Apotheek_analyse)
+
+optimaal_bestel_advies = optimaal_bestel_advies_ag.loc[OB_apotheek_selectie]
+
+
 # converteer uitverkoop advies type naar string
 optimaal_bestel_advies['Uitverk. advies'] = optimaal_bestel_advies['Uitverk. advies'].astype(str)
 # alleen uitverkoop-advies - ja
@@ -334,6 +360,207 @@ zoek_CF_verstrekkingen_3 = zoek_CF_verstrekkingen_2.loc[filter_zi]
 
 # laatste stap is het maken van een app waarmee we aan de slag kunnen.
 
+# =================================================================================================================================================================================================
+# TESTEN VAN HET CONCEPT VAN OVERVOORRAAD
+# ===================================================================================================================================================================================================
+
+
+
+
+# berekend de overvoorraad uit je assortiment
+
+Apotheek_analyse = 'helpman'
+
+# filter voor assortiment
+apotheek_assortiment_analyse = (assortiment_ag['apotheek']==Apotheek_analyse)
+
+# filter het assortiment
+assortiment_overvoorraad_analyse = assortiment_ag.loc[apotheek_assortiment_analyse]
+
+# filter voor optimaal bestellen
+apotheek_optimaal_bestel_advies_analyse = (optimaal_bestel_advies_ag['apotheek'] == Apotheek_analyse)
+
+# filter het optimaal bestel advies
+OB_analyse_overvoorraad = optimaal_bestel_advies_ag.loc[apotheek_optimaal_bestel_advies_analyse]
+
+# merge het assortiment dataframe met het OB dataframe en zorg dat alleen de voorspellling kolom wordt toegevoegd aan het assortiment
+assortiment_overvoorraad_analyse_1 = assortiment_overvoorraad_analyse.merge(OB_analyse_overvoorraad[['ZI', 'Voorspelling']], how='left', left_on='zinummer', right_on='ZI').drop(columns='ZI')
+
+# Zet de voorspelling NaN waarden op 0
+assortiment_overvoorraad_analyse_1['Voorspelling'] = assortiment_overvoorraad_analyse_1['Voorspelling'].replace(np.nan, 0, regex=True)
+
+# Nu gaan we de verstrekkingen van de analyse apotheek toevoegen aan het dataframe van het assortiment. We nemen het gemiddeld aantal eenheden van de afgelopen 2 maanden om te kijken naar wat een overvoorraad in eenheden en verpakkingen is.
+
+# kopieer oorspronkelijk recept dataframe
+recept_overvoorraad_ag = recept_ag.copy()
+
+# Maak van de datumrecept kolom een datetime object
+recept_overvoorraad_ag['ddDatumRecept'] = pd.to_datetime(recept_overvoorraad_ag['ddDatumRecept'])
+
+# definieer een filter
+recept_ov_apotheek_filter = (recept_overvoorraad_ag['apotheek']==Apotheek_analyse)
+
+# pas filter toe op recept dataframe
+recept_ov_apotheek = recept_overvoorraad_ag.loc[recept_ov_apotheek_filter]
+
+# excludeer Distributie, Zorg, dienst, LSP en CF-recepten
+distributie_niet_ov = (recept_ov_apotheek['ReceptHerkomst']!='D')
+zorg_niet_ov = (recept_ov_apotheek['ReceptHerkomst']!='Z')
+dienst_niet_ov = (recept_ov_apotheek['ReceptHerkomst']!='DIENST')
+lsp_niet_ov = (recept_ov_apotheek['sdMedewerkerCode']!='LSP')
+cf_niet_ov = (recept_ov_apotheek['cf']!='J')
+
+# pad de filters toe
+recept_ov_apotheek_1 = recept_ov_apotheek.loc[distributie_niet_ov & zorg_niet_ov & dienst_niet_ov & lsp_niet_ov & cf_niet_ov]
+
+# Nu hebben we alleen ladekast verstrekkingen te pakken. We gaan de verstrekkingen tellen van de afgelopen 2 maanden
+
+# Bepaal de meetdatum
+max_datum = recept_ov_apotheek_1['ddDatumRecept'].max()
+datum_2_maanden_terug = max_datum - pd.DateOffset(months=2)
+print(datum_2_maanden_terug)
+
+# Filter het dataframe nu op alle verstrekkingen van maximaal 2 maanden oud
+recept_ov_apotheek_2 = recept_ov_apotheek_1.loc[recept_ov_apotheek_1['ddDatumRecept']>=datum_2_maanden_terug]
+
+# Ga nu het aantal eenheden dat verstrekt is berekenen en bereken hier ook een maandgemiddelde van
+
+# bereken het aantal eenheden dat verstrekt is per artikel
+recept_ov_apotheek_3 = recept_ov_apotheek_2.groupby(by=['ndATKODE', 'sdEtiketNaam'])['ndAantal'].sum().to_frame('eenheden verstrekt').reset_index()
+
+# bereken het maandgemiddelde en maak hier een aparte kolom van
+recept_ov_apotheek_3['gem eh verstrekt per maand CGM'] = (recept_ov_apotheek_3['eenheden verstrekt']/2).astype(int)
+
+# bereken het aantal verpakkingen dat teveel op voorraad is
+
+# Voeg de inkoophoeveelheid toe aan het bestaande dataframe
+recept_ov_apotheek_4 = recept_ov_apotheek_3.merge(assortiment_overvoorraad_analyse_1[['zinummer', 'etiketnaam','inkhvh']], how='left', left_on=['ndATKODE', 'sdEtiketNaam'], right_on=['zinummer', 'etiketnaam']).drop(columns=['etiketnaam', 'zinummer'])
+
+# bereken hoeveel verpakkingen er per maand gemiddeld verstrekt worden
+recept_ov_apotheek_4['gem verp verstrekt per maand CGM'] = (recept_ov_apotheek_4['gem eh verstrekt per maand CGM']/recept_ov_apotheek_4['inkhvh'])
+
+# zet alle NaN waarden op 0
+recept_ov_apotheek_4['gem eh verstrekt per maand CGM'] = recept_ov_apotheek_4['gem eh verstrekt per maand CGM'].replace(np.nan, 0, regex=True)
+recept_ov_apotheek_4['gem verp verstrekt per maand CGM'] = recept_ov_apotheek_4['gem verp verstrekt per maand CGM'].replace(np.nan, 0, regex=True)
+recept_ov_apotheek_4['gem verp verstrekt per maand CGM'] = recept_ov_apotheek_4['gem verp verstrekt per maand CGM'].round(1)
+
+# nu moeten we de dataframes gaan samenvoegen zodat we de overvoorraad kunnen berekenen.
+assortiment_overvoorraad_analyse_2 = assortiment_overvoorraad_analyse_1.merge(recept_ov_apotheek_4[['ndATKODE', 'sdEtiketNaam','gem verp verstrekt per maand CGM']], how='left', left_on=['zinummer', 'etiketnaam'], right_on=['ndATKODE', 'sdEtiketNaam']).drop(columns='ndATKODE')
+
+# maak de boel netjes de verstrekkingen, en Voorspelling met NaN moeten worden vervangen door 0
+assortiment_overvoorraad_analyse_2['Voorspelling'] = assortiment_overvoorraad_analyse_2['Voorspelling'].replace(np.nan, 0, regex=True)
+assortiment_overvoorraad_analyse_2['gem verp verstrekt per maand CGM'] = assortiment_overvoorraad_analyse_2['gem verp verstrekt per maand CGM'].replace(np.nan, 0, regex=True)
+
+# Bereken de voorraad in verpakkingen
+assortiment_overvoorraad_analyse_2['voorraadtotaal verp'] = (assortiment_overvoorraad_analyse_2['voorraadtotaal']/assortiment_overvoorraad_analyse_2['inkhvh']).round(1)
+
+# Overvoorraad berekenen in verpakkingen en AIP
+assortiment_overvoorraad_analyse_2['overvoorraad verp'] = assortiment_overvoorraad_analyse_2['voorraadtotaal verp'] - assortiment_overvoorraad_analyse_2['gem verp verstrekt per maand CGM']
+assortiment_overvoorraad_analyse_2['overvoorraad aip'] = assortiment_overvoorraad_analyse_2['overvoorraad verp'] * assortiment_overvoorraad_analyse_2['inkprijs']
+
+# Nu kun je het dataframe analyseren op een postitieve waarde van de overvoorraad
+overvoorraad_filter_verpakkingen = (assortiment_overvoorraad_analyse_2['overvoorraad verp']>1)
+
+# pas het filter toe
+assortiment_overvoorraad_analyse_3 = assortiment_overvoorraad_analyse_2.loc[overvoorraad_filter_verpakkingen]
+
+# maak de boel wat schoner door wat kolommen te droppen
+assortiment_overvoorraad_analyse_4 = assortiment_overvoorraad_analyse_3[['produktgroep', 'zinummer', 'artikelnaam',
+       'inkhvh', 'eh', 'voorraadminimum', 'voorraadmaximum', 'locatie1',
+       'voorraadtotaal', 'voorraadtotaal verp', 'inkprijs', 'apotheek',
+       'Voorspelling', 'gem verp verstrekt per maand CGM'
+       , 'overvoorraad verp', 'overvoorraad aip']]
+
+# sorteer het dataframe van hoog naar laag op basis van AIP overvoorraad
+assortiment_overvoorraad_analyse_5 = assortiment_overvoorraad_analyse_4.sort_values(by=['overvoorraad aip'], ascending=False)
+
+# nu moeten we nog weten waar we alles naartoe moeten verschepen.
+# de eenheden die verstrekt kunnen worden naar andere apotheken (op basis van de laatste 2 maanden moeten worden weergegeven)
+
+# ============================== VERSTREKKINGEN PER APOTHEEK VAN ALLE APOTHEKEN METEN ==================
+
+verstrekkingen_ag = recept_ag.copy()
+
+# maak van de datum een datetime kolom
+verstrekkingen_ag['ddDatumRecept'] = pd.to_datetime(verstrekkingen_ag['ddDatumRecept'])
+
+# filters voor exclusie (zorg, dienst, lsp, cf, distributie)
+distributie_niet = (verstrekkingen_ag['ReceptHerkomst']!='D')
+zorg_niet = (verstrekkingen_ag['ReceptHerkomst']!='Z')
+dienst_niet = (verstrekkingen_ag['ReceptHerkomst']!='DIENST')
+lsp_niet = (verstrekkingen_ag['sdMedewerkerCode']!='LSP')
+cf_niet = (verstrekkingen_ag['cf']!='J')
+cf_wel = (verstrekkingen_ag['cf']=='J')
+
+# pas de filters toe op het dataframe
+
+verstrekkingen_ag_1 = verstrekkingen_ag.loc[distributie_niet & zorg_niet & dienst_niet & lsp_niet & cf_niet]
+
+# Bepaal de meetdatum voor de laatste 2 maanden
+max_datum_verstrekkingen = verstrekkingen_ag_1['ddDatumRecept'].max()
+datum_2_maanden_terug_verstrekkingen = max_datum_verstrekkingen - pd.DateOffset(months=2)
+
+# pas het dataframe aan, aan het tijdframe dat je wilt bekijken
+verstrekkingen_ag_2 = verstrekkingen_ag_1.loc[verstrekkingen_ag_1['ddDatumRecept']>=datum_2_maanden_terug_verstrekkingen]
+
+# Tel nu de eenheden die verstrekt zijn in de ladekast van iedere apotheek apart en bereken hier ook een maandgemiddelde van
+
+verstrekkingen_ag_3 = verstrekkingen_ag_2.groupby(by=['apotheek', 'ndATKODE', 'sdEtiketNaam'])['ndAantal'].sum().to_frame('eenheden verstrekt 2 mnd (CGM)').reset_index()
+
+
+#maak nu een pivot table hiervan zodat je alle apotheken op een rijtje naast elkaar hebt.
+
+verstrekkingen_ag_4 = verstrekkingen_ag_3.pivot_table(index=['ndATKODE', 'sdEtiketNaam'],
+                                                      columns='apotheek',
+                                                      values='eenheden verstrekt 2 mnd (CGM)').reset_index()
+
+# nu moeten we voor alle kolommen genaamd hanzeplein, helpman, musselpark, oosterhaar, oosterpoort en wiljes een functie schrijven die alle NaN waarden omzet naar 0
+
+for col in verstrekkingen_ag_4.columns[2:]:
+    verstrekkingen_ag_4[col] = verstrekkingen_ag_4[col].replace(np.nan, 0, regex=True)
+
+
+# nu moeten we de dataframes gaan mergen zodat we een totoal overzicht kunnen maken voor de apotheek van de overvoorraad
+
+assortiment_overvoorraad_analyse_6 = assortiment_overvoorraad_analyse_5.merge(verstrekkingen_ag_4[['ndATKODE', 'hanzeplein', 'oosterpoort', 'helpman', 'wiljes', 'oosterhaar', 'musselpark']], how='left', left_on='zinummer', right_on='ndATKODE').drop(columns='ndATKODE')
+
+
+# nu gaan we hier de CF verstrekkingen nog aan toevoegen
+
+# nu alleen de CF verstrekkingen pakken
+verstrekkingen_ag_5 = verstrekkingen_ag.loc[distributie_niet & zorg_niet & dienst_niet & lsp_niet & cf_wel]
+
+verstrekkingen_ag_6 = verstrekkingen_ag_5.loc[(verstrekkingen_ag_5['ddDatumRecept']>=datum_2_maanden_terug_verstrekkingen)]
+
+verstrekkingen_ag_7 = verstrekkingen_ag_6.loc[(verstrekkingen_ag_6['apotheek']==Apotheek_analyse)]
+
+verstrekkingen_ag_8 = verstrekkingen_ag_7.groupby(by=['ndATKODE', 'sdEtiketNaam'])['ndAantal'].sum().to_frame('eenheden verstrekt CF CGM apotheek analyse').reset_index()
+
+cf_verstrekkingen_analyse_apotheek = verstrekkingen_ag_8
+
+
+
+
+
+
+
+
+# nu mergen we alles tot een dataframe samenkomend dataframe
+
+assortiment_overvoorraad_analyse_7 = assortiment_overvoorraad_analyse_6.merge(cf_verstrekkingen_analyse_apotheek[['ndATKODE', 'eenheden verstrekt CF CGM apotheek analyse']], how='left', left_on='zinummer', right_on='ndATKODE').drop(columns='ndATKODE')
+
+#vanaf hier maken we er een dash ag grid van
+
+#assortiment_overvoorraad_analyse_7.to_excel('overvoorraad_analyse.xlsx')
+
+# ============================= OVERZICHT DATAFRAMES ============================
+assortiment_overvoorraad_analyse_5                      # Analyse van de overvoorraad in het assortiment van de geselecteerde apotheek
+verstrekkingen_ag_4                                     # alle verstrekkingen uit de ladekast van artikelen uit alle apotheken (afgelopen 2 maanden)
+assortiment_overvoorraad_analyse_6                      # alle overvoorraad samen met alle ladekast verstrekkingen van alle apotheken
+cf_verstrekkingen_analyse_apotheek                      # alle CF verstrekkingen van de apotheek die bekeken wordt in de analyse
+assortiment_overvoorraad_analyse_7                      # het DEFINTIEVE DATAFRAME MET over voorraad: ladekast verstrekkingen en CF verstrekkingen
+# ============================= OVERZICHT DATAFRAMES ============================
+
 
 
 # Maken van de app
@@ -361,6 +588,17 @@ app.layout = dbc.Container([
               dbc.Col([], width=6)
        ]),
        dbc.Row([html.Div(id='CF verstrekkingen')]),
+
+       dbc.Row([html.H4('Overvoorraad Analyse')]),
+       dbc.Row([html.Div(id='overvoorraad')]),                  # Overvoorraad dahs ag grid
+       dbc.Row([
+           dbc.Col([],width=10),
+           dbc.Col([
+                dbc.Button(id='download_overvoorraad', children="Download xlsx", color="success", className="me-1"),    #knopje voor downloaden
+                dcc.Download(id='download_ov')                                                                # download optie
+           ], width=2)
+       ]),
+
 ])
 
 
@@ -510,6 +748,7 @@ def winkeldochters_apotheek(apotheek):
        # filter het assortiment van de te analyseren apotheek uit de bult
        analyse_assortiment_apotheek = analyse_assortiment.loc[apotheek_keuze]
 
+       # bereken de voorraadwaarde van iedere winkeldochter
        analyse_assortiment_apotheek['voorraadwaarde'] = (
                       (analyse_assortiment_apotheek['voorraadtotaal'] / analyse_assortiment_apotheek['inkhvh']) *
                       analyse_assortiment_apotheek['inkprijs']).astype(int)
@@ -531,7 +770,14 @@ def winkeldochters_apotheek(apotheek):
 
        analyse_bestand_1 = analyse_bestand.loc[voorraad_winkeldochter]
 
-       # We hebben nu de verstrekkingen bij de andere apotheken in kaart... nu is het zaak om het optimaal bestellen toe te voegen aan de mix.
+       # We hebben nu de verstrekkingen bij de andere apotheken in kaart... nu is het zaak om OPTIMAAL BESTELLEN TOE TE VOEGEN AAN DE MIX
+
+       # Zorg dat je eerst verder werkt met het juiste optimaal bestel advies door de apotheek te filteren die je geselecteerd hebt
+
+       OB_apotheek_selectie = (optimaal_bestel_advies_ag['apotheek'] == Apotheek_analyse)
+
+       optimaal_bestel_advies = optimaal_bestel_advies_ag.loc[OB_apotheek_selectie]
+
        # converteer uitverkoop advies type naar string
        optimaal_bestel_advies['Uitverk. advies'] = optimaal_bestel_advies['Uitverk. advies'].astype(str)
        # alleen uitverkoop-advies - ja
@@ -562,12 +808,12 @@ def winkeldochters_apotheek(apotheek):
        winkeldochters_compleet['eenheden verstrekt CF'] = (
               winkeldochters_compleet['eenheden verstrekt CF'].replace(np.nan, 0, regex=True)).astype(int)
 
-       wd_grid = dag.AgGrid(
+       winkeldochters_grid = dag.AgGrid(
               rowData=winkeldochters_compleet.to_dict('records'),
               columnDefs=[{'field': i } for i in winkeldochters_compleet.columns],
               dashGridOptions={'enableCellTextSelection':'True'}
        )
-       return wd_grid
+       return winkeldochters_grid
 
 @callback(
        Output('download winkeldochters', 'data'),
@@ -702,7 +948,7 @@ def download_winkeldochters(n_clicks, apotheek):
        # ======================================================================================================================================================
 
        # ======================================================================================================================================================
-       Apotheek_analyse = 'helpman'  # Filter voor apotheek
+       Apotheek_analyse = apotheek  # Filter voor apotheek
        # ======================================================================================================================================================
 
        # selecteer het assortiment van de apotheek dat je wilt analyseren
@@ -720,6 +966,7 @@ def download_winkeldochters(n_clicks, apotheek):
        # filter het assortiment van de te analyseren apotheek uit de bult
        analyse_assortiment_apotheek = analyse_assortiment.loc[apotheek_keuze]
 
+       # bereken de voorraadwaarde van iedere winkeldochter
        analyse_assortiment_apotheek['voorraadwaarde'] = (
                       (analyse_assortiment_apotheek['voorraadtotaal'] / analyse_assortiment_apotheek['inkhvh']) *
                       analyse_assortiment_apotheek['inkprijs']).astype(int)
@@ -742,6 +989,13 @@ def download_winkeldochters(n_clicks, apotheek):
        analyse_bestand_1 = analyse_bestand.loc[voorraad_winkeldochter]
 
        # We hebben nu de verstrekkingen bij de andere apotheken in kaart... nu is het zaak om OPTIMAAL BESTELLEN TOE TE VOEGEN AAN DE MIX
+
+       # Zorg dat je eerst verder werkt met het juiste optimaal bestel advies door de apotheek te filteren die je geselecteerd hebt
+
+       OB_apotheek_selectie = (optimaal_bestel_advies_ag['apotheek'] == Apotheek_analyse)
+
+       optimaal_bestel_advies = optimaal_bestel_advies_ag.loc[OB_apotheek_selectie]
+
        # converteer uitverkoop advies type naar string
        optimaal_bestel_advies['Uitverk. advies'] = optimaal_bestel_advies['Uitverk. advies'].astype(str)
        # alleen uitverkoop-advies - ja
@@ -771,6 +1025,7 @@ def download_winkeldochters(n_clicks, apotheek):
 
        winkeldochters_compleet['eenheden verstrekt CF'] = (
               winkeldochters_compleet['eenheden verstrekt CF'].replace(np.nan, 0, regex=True)).astype(int)
+
        n_clicks = None
 
        return dcc.send_data_frame(winkeldochters_compleet.to_excel, "winkeldochters.xlsx"), n_clicks
@@ -828,17 +1083,488 @@ def zoek_CF_verstrekkingen(apotheek, zi):
          )
        return CF_grid
 
+# Callback voor het dash ag grid van de overvoorraad
+@callback(
+            Output('overvoorraad', 'children'),
+            Input('apotheek', 'value')
+)
+def overvoorraad(apotheek):
+    # =================================================================================================================================================================================================
+    # TESTEN VAN HET CONCEPT VAN OVERVOORRAAD
+    # ===================================================================================================================================================================================================
+
+    # berekend de overvoorraad uit je assortiment
+
+    Apotheek_analyse = apotheek
+
+    # filter voor assortiment
+    apotheek_assortiment_analyse = (assortiment_ag['apotheek'] == Apotheek_analyse)
+
+    # filter het assortiment
+    assortiment_overvoorraad_analyse = assortiment_ag.loc[apotheek_assortiment_analyse]
+
+    # filter voor optimaal bestellen
+    apotheek_optimaal_bestel_advies_analyse = (optimaal_bestel_advies_ag['apotheek'] == Apotheek_analyse)
+
+    # filter het optimaal bestel advies
+    OB_analyse_overvoorraad = optimaal_bestel_advies_ag.loc[apotheek_optimaal_bestel_advies_analyse]
+
+    # merge het assortiment dataframe met het OB dataframe en zorg dat alleen de voorspellling kolom wordt toegevoegd aan het assortiment
+    assortiment_overvoorraad_analyse_1 = assortiment_overvoorraad_analyse.merge(
+        OB_analyse_overvoorraad[['ZI', 'Voorspelling']], how='left', left_on='zinummer', right_on='ZI').drop(
+        columns='ZI')
+
+    # Zet de voorspelling NaN waarden op 0
+    assortiment_overvoorraad_analyse_1['Voorspelling'] = assortiment_overvoorraad_analyse_1['Voorspelling'].replace(
+        np.nan, 0, regex=True)
+
+    # Nu gaan we de verstrekkingen van de analyse apotheek toevoegen aan het dataframe van het assortiment. We nemen het gemiddeld aantal eenheden van de afgelopen 2 maanden om te kijken naar wat een overvoorraad in eenheden en verpakkingen is.
+
+    # kopieer oorspronkelijk recept dataframe
+    recept_overvoorraad_ag = recept_ag.copy()
+
+    # Maak van de datumrecept kolom een datetime object
+    recept_overvoorraad_ag['ddDatumRecept'] = pd.to_datetime(recept_overvoorraad_ag['ddDatumRecept'])
+
+    # definieer een filter
+    recept_ov_apotheek_filter = (recept_overvoorraad_ag['apotheek'] == Apotheek_analyse)
+
+    # pas filter toe op recept dataframe
+    recept_ov_apotheek = recept_overvoorraad_ag.loc[recept_ov_apotheek_filter]
+
+    # excludeer Distributie, Zorg, dienst, LSP en CF-recepten
+    distributie_niet_ov = (recept_ov_apotheek['ReceptHerkomst'] != 'D')
+    zorg_niet_ov = (recept_ov_apotheek['ReceptHerkomst'] != 'Z')
+    dienst_niet_ov = (recept_ov_apotheek['ReceptHerkomst'] != 'DIENST')
+    lsp_niet_ov = (recept_ov_apotheek['sdMedewerkerCode'] != 'LSP')
+    cf_niet_ov = (recept_ov_apotheek['cf'] != 'J')
+
+    # pad de filters toe
+    recept_ov_apotheek_1 = recept_ov_apotheek.loc[
+        distributie_niet_ov & zorg_niet_ov & dienst_niet_ov & lsp_niet_ov & cf_niet_ov]
+
+    # Nu hebben we alleen ladekast verstrekkingen te pakken. We gaan de verstrekkingen tellen van de afgelopen 2 maanden
+
+    # Bepaal de meetdatum
+    max_datum = recept_ov_apotheek_1['ddDatumRecept'].max()
+    datum_2_maanden_terug = max_datum - pd.DateOffset(months=2)
+    print(datum_2_maanden_terug)
+
+    # Filter het dataframe nu op alle verstrekkingen van maximaal 2 maanden oud
+    recept_ov_apotheek_2 = recept_ov_apotheek_1.loc[recept_ov_apotheek_1['ddDatumRecept'] >= datum_2_maanden_terug]
+
+    # Ga nu het aantal eenheden dat verstrekt is berekenen en bereken hier ook een maandgemiddelde van
+
+    # bereken het aantal eenheden dat verstrekt is per artikel
+    recept_ov_apotheek_3 = recept_ov_apotheek_2.groupby(by=['ndATKODE', 'sdEtiketNaam'])['ndAantal'].sum().to_frame(
+        'eenheden verstrekt').reset_index()
+
+    # bereken het maandgemiddelde en maak hier een aparte kolom van
+    recept_ov_apotheek_3['gem eh verstrekt per maand CGM'] = (recept_ov_apotheek_3['eenheden verstrekt'] / 2).astype(
+        int)
+
+    # bereken het aantal verpakkingen dat teveel op voorraad is
+
+    # Voeg de inkoophoeveelheid toe aan het bestaande dataframe
+    recept_ov_apotheek_4 = recept_ov_apotheek_3.merge(
+        assortiment_overvoorraad_analyse_1[['zinummer', 'etiketnaam', 'inkhvh']], how='left',
+        left_on=['ndATKODE', 'sdEtiketNaam'], right_on=['zinummer', 'etiketnaam']).drop(
+        columns=['etiketnaam', 'zinummer'])
+
+    # bereken hoeveel verpakkingen er per maand gemiddeld verstrekt worden
+    recept_ov_apotheek_4['gem verp verstrekt per maand CGM'] = (
+                recept_ov_apotheek_4['gem eh verstrekt per maand CGM'] / recept_ov_apotheek_4['inkhvh'])
+
+    # zet alle NaN waarden op 0
+    recept_ov_apotheek_4['gem eh verstrekt per maand CGM'] = recept_ov_apotheek_4[
+        'gem eh verstrekt per maand CGM'].replace(np.nan, 0, regex=True)
+    recept_ov_apotheek_4['gem verp verstrekt per maand CGM'] = recept_ov_apotheek_4[
+        'gem verp verstrekt per maand CGM'].replace(np.nan, 0, regex=True)
+    recept_ov_apotheek_4['gem verp verstrekt per maand CGM'] = recept_ov_apotheek_4[
+        'gem verp verstrekt per maand CGM'].round(1)
+
+    # nu moeten we de dataframes gaan samenvoegen zodat we de overvoorraad kunnen berekenen.
+    assortiment_overvoorraad_analyse_2 = assortiment_overvoorraad_analyse_1.merge(
+        recept_ov_apotheek_4[['ndATKODE', 'sdEtiketNaam', 'gem verp verstrekt per maand CGM']], how='left',
+        left_on=['zinummer', 'etiketnaam'], right_on=['ndATKODE', 'sdEtiketNaam']).drop(columns='ndATKODE')
+
+    # maak de boel netjes de verstrekkingen, en Voorspelling met NaN moeten worden vervangen door 0
+    assortiment_overvoorraad_analyse_2['Voorspelling'] = assortiment_overvoorraad_analyse_2['Voorspelling'].replace(
+        np.nan, 0, regex=True)
+    assortiment_overvoorraad_analyse_2['gem verp verstrekt per maand CGM'] = assortiment_overvoorraad_analyse_2[
+        'gem verp verstrekt per maand CGM'].replace(np.nan, 0, regex=True)
+
+    # Bereken de voorraad in verpakkingen
+    assortiment_overvoorraad_analyse_2['voorraadtotaal verp'] = (
+                assortiment_overvoorraad_analyse_2['voorraadtotaal'] / assortiment_overvoorraad_analyse_2[
+            'inkhvh']).round(1)
+
+    # Overvoorraad berekenen in verpakkingen en AIP
+    assortiment_overvoorraad_analyse_2['overvoorraad verp'] = assortiment_overvoorraad_analyse_2[
+                                                                  'voorraadtotaal verp'] - \
+                                                              assortiment_overvoorraad_analyse_2[
+                                                                  'gem verp verstrekt per maand CGM']
+    assortiment_overvoorraad_analyse_2['overvoorraad aip'] = assortiment_overvoorraad_analyse_2['overvoorraad verp'] * \
+                                                             assortiment_overvoorraad_analyse_2['inkprijs']
+
+    # Nu kun je het dataframe analyseren op een postitieve waarde van de overvoorraad
+    overvoorraad_filter_verpakkingen = (assortiment_overvoorraad_analyse_2['overvoorraad verp'] > 1)
+
+    # pas het filter toe
+    assortiment_overvoorraad_analyse_3 = assortiment_overvoorraad_analyse_2.loc[overvoorraad_filter_verpakkingen]
+
+    # maak de boel wat schoner door wat kolommen te droppen
+    assortiment_overvoorraad_analyse_4 = assortiment_overvoorraad_analyse_3[['produktgroep', 'zinummer', 'artikelnaam',
+                                                                             'inkhvh', 'eh', 'voorraadminimum',
+                                                                             'voorraadmaximum', 'locatie1',
+                                                                             'voorraadtotaal', 'voorraadtotaal verp',
+                                                                             'inkprijs', 'apotheek',
+                                                                             'Voorspelling',
+                                                                             'gem verp verstrekt per maand CGM'
+        , 'overvoorraad verp', 'overvoorraad aip']]
+
+    # sorteer het dataframe van hoog naar laag op basis van AIP overvoorraad
+    assortiment_overvoorraad_analyse_5 = assortiment_overvoorraad_analyse_4.sort_values(by=['overvoorraad aip'],
+                                                                                        ascending=False)
+
+    # nu moeten we nog weten waar we alles naartoe moeten verschepen.
+    # de eenheden die verstrekt kunnen worden naar andere apotheken (op basis van de laatste 2 maanden moeten worden weergegeven)
+
+    # ============================== VERSTREKKINGEN PER APOTHEEK VAN ALLE APOTHEKEN METEN ==================
+
+    verstrekkingen_ag = recept_ag.copy()
+
+    # maak van de datum een datetime kolom
+    verstrekkingen_ag['ddDatumRecept'] = pd.to_datetime(verstrekkingen_ag['ddDatumRecept'])
+
+    # filters voor exclusie (zorg, dienst, lsp, cf, distributie)
+    distributie_niet = (verstrekkingen_ag['ReceptHerkomst'] != 'D')
+    zorg_niet = (verstrekkingen_ag['ReceptHerkomst'] != 'Z')
+    dienst_niet = (verstrekkingen_ag['ReceptHerkomst'] != 'DIENST')
+    lsp_niet = (verstrekkingen_ag['sdMedewerkerCode'] != 'LSP')
+    cf_niet = (verstrekkingen_ag['cf'] != 'J')
+    cf_wel = (verstrekkingen_ag['cf'] == 'J')
+
+    # pas de filters toe op het dataframe
+
+    verstrekkingen_ag_1 = verstrekkingen_ag.loc[distributie_niet & zorg_niet & dienst_niet & lsp_niet & cf_niet]
+
+    # Bepaal de meetdatum voor de laatste 2 maanden
+    max_datum_verstrekkingen = verstrekkingen_ag_1['ddDatumRecept'].max()
+    datum_2_maanden_terug_verstrekkingen = max_datum_verstrekkingen - pd.DateOffset(months=2)
+
+    # pas het dataframe aan, aan het tijdframe dat je wilt bekijken
+    verstrekkingen_ag_2 = verstrekkingen_ag_1.loc[
+        verstrekkingen_ag_1['ddDatumRecept'] >= datum_2_maanden_terug_verstrekkingen]
+
+    # Tel nu de eenheden die verstrekt zijn in de ladekast van iedere apotheek apart en bereken hier ook een maandgemiddelde van
+
+    verstrekkingen_ag_3 = verstrekkingen_ag_2.groupby(by=['apotheek', 'ndATKODE', 'sdEtiketNaam'])[
+        'ndAantal'].sum().to_frame('eenheden verstrekt 2 mnd (CGM)').reset_index()
+
+    # maak nu een pivot table hiervan zodat je alle apotheken op een rijtje naast elkaar hebt.
+
+    verstrekkingen_ag_4 = verstrekkingen_ag_3.pivot_table(index=['ndATKODE', 'sdEtiketNaam'],
+                                                          columns='apotheek',
+                                                          values='eenheden verstrekt 2 mnd (CGM)').reset_index()
+
+    # nu moeten we voor alle kolommen genaamd hanzeplein, helpman, musselpark, oosterhaar, oosterpoort en wiljes een functie schrijven die alle NaN waarden omzet naar 0
+
+    for col in verstrekkingen_ag_4.columns[2:]:
+        verstrekkingen_ag_4[col] = verstrekkingen_ag_4[col].replace(np.nan, 0, regex=True)
+
+    # nu moeten we de dataframes gaan mergen zodat we een totoal overzicht kunnen maken voor de apotheek van de overvoorraad
+
+    assortiment_overvoorraad_analyse_6 = assortiment_overvoorraad_analyse_5.merge(
+        verstrekkingen_ag_4[['ndATKODE', 'hanzeplein', 'oosterpoort', 'helpman', 'wiljes', 'oosterhaar', 'musselpark']],
+        how='left', left_on='zinummer', right_on='ndATKODE').drop(columns='ndATKODE')
+
+    # nu gaan we hier de CF verstrekkingen nog aan toevoegen
+
+    # nu alleen de CF verstrekkingen pakken
+    verstrekkingen_ag_5 = verstrekkingen_ag.loc[distributie_niet & zorg_niet & dienst_niet & lsp_niet & cf_wel]
+
+    verstrekkingen_ag_6 = verstrekkingen_ag_5.loc[
+        (verstrekkingen_ag_5['ddDatumRecept'] >= datum_2_maanden_terug_verstrekkingen)]
+
+    verstrekkingen_ag_7 = verstrekkingen_ag_6.loc[(verstrekkingen_ag_6['apotheek'] == Apotheek_analyse)]
+
+    verstrekkingen_ag_8 = verstrekkingen_ag_7.groupby(by=['ndATKODE', 'sdEtiketNaam'])['ndAantal'].sum().to_frame(
+        'eenheden verstrekt CF CGM apotheek analyse').reset_index()
+
+    cf_verstrekkingen_analyse_apotheek = verstrekkingen_ag_8
+
+    # nu mergen we alles tot een dataframe samenkomend dataframe
+
+    assortiment_overvoorraad_analyse_7 = assortiment_overvoorraad_analyse_6.merge(
+        cf_verstrekkingen_analyse_apotheek[['ndATKODE', 'eenheden verstrekt CF CGM apotheek analyse']], how='left',
+        left_on='zinummer', right_on='ndATKODE').drop(columns='ndATKODE')
+
+    # vanaf hier maken we er een dash ag grid van
+
+    # assortiment_overvoorraad_analyse_7.to_excel('overvoorraad_analyse.xlsx')
+
+    # ============================= OVERZICHT DATAFRAMES ============================
+    assortiment_overvoorraad_analyse_5  # Analyse van de overvoorraad in het assortiment van de geselecteerde apotheek
+    verstrekkingen_ag_4  # alle verstrekkingen uit de ladekast van artikelen uit alle apotheken (afgelopen 2 maanden)
+    assortiment_overvoorraad_analyse_6  # alle overvoorraad samen met alle ladekast verstrekkingen van alle apotheken
+    cf_verstrekkingen_analyse_apotheek  # alle CF verstrekkingen van de apotheek die bekeken wordt in de analyse
+    assortiment_overvoorraad_analyse_7  # het DEFINTIEVE DATAFRAME MET over voorraad: ladekast verstrekkingen en CF verstrekkingen
+    # ============================= OVERZICHT DATAFRAMES ============================
+
+
+    # maak een dash ag grid van het dataframe
+    overvoorraad_grid = dag.AgGrid(
+        rowData=assortiment_overvoorraad_analyse_7.to_dict('records'),
+        columnDefs=[{'field': i} for i in assortiment_overvoorraad_analyse_7.columns],
+        dashGridOptions={'enableCellTextSelection': 'True'}
+    )
+    return overvoorraad_grid
+
+# Callback voor de overvoorraad in excel te downloaden
+@callback(
+    Output('download_ov', 'data'),
+    Output('download_overvoorraad', 'n_clicks'),
+    Input('download_overvoorraad', 'n_clicks'),
+    Input('apotheek', 'value')
+)
+def download_overvoorraad(n_clicks, apotheek):
+
+    if n_clicks is None:
+        raise PreventUpdate
+
+    else:
+        # =================================================================================================================================================================================================
+        # TESTEN VAN HET CONCEPT VAN OVERVOORRAAD
+        # ===================================================================================================================================================================================================
+
+        # berekend de overvoorraad uit je assortiment
+
+        Apotheek_analyse = apotheek
+
+        # filter voor assortiment
+        apotheek_assortiment_analyse = (assortiment_ag['apotheek'] == Apotheek_analyse)
+
+        # filter het assortiment
+        assortiment_overvoorraad_analyse = assortiment_ag.loc[apotheek_assortiment_analyse]
+
+        # filter voor optimaal bestellen
+        apotheek_optimaal_bestel_advies_analyse = (optimaal_bestel_advies_ag['apotheek'] == Apotheek_analyse)
+
+        # filter het optimaal bestel advies
+        OB_analyse_overvoorraad = optimaal_bestel_advies_ag.loc[apotheek_optimaal_bestel_advies_analyse]
+
+        # merge het assortiment dataframe met het OB dataframe en zorg dat alleen de voorspellling kolom wordt toegevoegd aan het assortiment
+        assortiment_overvoorraad_analyse_1 = assortiment_overvoorraad_analyse.merge(
+            OB_analyse_overvoorraad[['ZI', 'Voorspelling']], how='left', left_on='zinummer', right_on='ZI').drop(
+            columns='ZI')
+
+        # Zet de voorspelling NaN waarden op 0
+        assortiment_overvoorraad_analyse_1['Voorspelling'] = assortiment_overvoorraad_analyse_1['Voorspelling'].replace(
+            np.nan, 0, regex=True)
+
+        # Nu gaan we de verstrekkingen van de analyse apotheek toevoegen aan het dataframe van het assortiment. We nemen het gemiddeld aantal eenheden van de afgelopen 2 maanden om te kijken naar wat een overvoorraad in eenheden en verpakkingen is.
+
+        # kopieer oorspronkelijk recept dataframe
+        recept_overvoorraad_ag = recept_ag.copy()
+
+        # Maak van de datumrecept kolom een datetime object
+        recept_overvoorraad_ag['ddDatumRecept'] = pd.to_datetime(recept_overvoorraad_ag['ddDatumRecept'])
+
+        # definieer een filter
+        recept_ov_apotheek_filter = (recept_overvoorraad_ag['apotheek'] == Apotheek_analyse)
+
+        # pas filter toe op recept dataframe
+        recept_ov_apotheek = recept_overvoorraad_ag.loc[recept_ov_apotheek_filter]
+
+        # excludeer Distributie, Zorg, dienst, LSP en CF-recepten
+        distributie_niet_ov = (recept_ov_apotheek['ReceptHerkomst'] != 'D')
+        zorg_niet_ov = (recept_ov_apotheek['ReceptHerkomst'] != 'Z')
+        dienst_niet_ov = (recept_ov_apotheek['ReceptHerkomst'] != 'DIENST')
+        lsp_niet_ov = (recept_ov_apotheek['sdMedewerkerCode'] != 'LSP')
+        cf_niet_ov = (recept_ov_apotheek['cf'] != 'J')
+
+        # pad de filters toe
+        recept_ov_apotheek_1 = recept_ov_apotheek.loc[
+            distributie_niet_ov & zorg_niet_ov & dienst_niet_ov & lsp_niet_ov & cf_niet_ov]
+
+        # Nu hebben we alleen ladekast verstrekkingen te pakken. We gaan de verstrekkingen tellen van de afgelopen 2 maanden
+
+        # Bepaal de meetdatum
+        max_datum = recept_ov_apotheek_1['ddDatumRecept'].max()
+        datum_2_maanden_terug = max_datum - pd.DateOffset(months=2)
+        print(datum_2_maanden_terug)
+
+        # Filter het dataframe nu op alle verstrekkingen van maximaal 2 maanden oud
+        recept_ov_apotheek_2 = recept_ov_apotheek_1.loc[recept_ov_apotheek_1['ddDatumRecept'] >= datum_2_maanden_terug]
+
+        # Ga nu het aantal eenheden dat verstrekt is berekenen en bereken hier ook een maandgemiddelde van
+
+        # bereken het aantal eenheden dat verstrekt is per artikel
+        recept_ov_apotheek_3 = recept_ov_apotheek_2.groupby(by=['ndATKODE', 'sdEtiketNaam'])['ndAantal'].sum().to_frame(
+            'eenheden verstrekt').reset_index()
+
+        # bereken het maandgemiddelde en maak hier een aparte kolom van
+        recept_ov_apotheek_3['gem eh verstrekt per maand CGM'] = (
+                    recept_ov_apotheek_3['eenheden verstrekt'] / 2).astype(int)
+
+        # bereken het aantal verpakkingen dat teveel op voorraad is
+
+        # Voeg de inkoophoeveelheid toe aan het bestaande dataframe
+        recept_ov_apotheek_4 = recept_ov_apotheek_3.merge(
+            assortiment_overvoorraad_analyse_1[['zinummer', 'etiketnaam', 'inkhvh']], how='left',
+            left_on=['ndATKODE', 'sdEtiketNaam'], right_on=['zinummer', 'etiketnaam']).drop(
+            columns=['etiketnaam', 'zinummer'])
+
+        # bereken hoeveel verpakkingen er per maand gemiddeld verstrekt worden
+        recept_ov_apotheek_4['gem verp verstrekt per maand CGM'] = (
+                    recept_ov_apotheek_4['gem eh verstrekt per maand CGM'] / recept_ov_apotheek_4['inkhvh'])
+
+        # zet alle NaN waarden op 0
+        recept_ov_apotheek_4['gem eh verstrekt per maand CGM'] = recept_ov_apotheek_4[
+            'gem eh verstrekt per maand CGM'].replace(np.nan, 0, regex=True)
+        recept_ov_apotheek_4['gem verp verstrekt per maand CGM'] = recept_ov_apotheek_4[
+            'gem verp verstrekt per maand CGM'].replace(np.nan, 0, regex=True)
+        recept_ov_apotheek_4['gem verp verstrekt per maand CGM'] = recept_ov_apotheek_4[
+            'gem verp verstrekt per maand CGM'].round(1)
+
+        # nu moeten we de dataframes gaan samenvoegen zodat we de overvoorraad kunnen berekenen.
+        assortiment_overvoorraad_analyse_2 = assortiment_overvoorraad_analyse_1.merge(
+            recept_ov_apotheek_4[['ndATKODE', 'sdEtiketNaam', 'gem verp verstrekt per maand CGM']], how='left',
+            left_on=['zinummer', 'etiketnaam'], right_on=['ndATKODE', 'sdEtiketNaam']).drop(columns='ndATKODE')
+
+        # maak de boel netjes de verstrekkingen, en Voorspelling met NaN moeten worden vervangen door 0
+        assortiment_overvoorraad_analyse_2['Voorspelling'] = assortiment_overvoorraad_analyse_2['Voorspelling'].replace(
+            np.nan, 0, regex=True)
+        assortiment_overvoorraad_analyse_2['gem verp verstrekt per maand CGM'] = assortiment_overvoorraad_analyse_2[
+            'gem verp verstrekt per maand CGM'].replace(np.nan, 0, regex=True)
+
+        # Bereken de voorraad in verpakkingen
+        assortiment_overvoorraad_analyse_2['voorraadtotaal verp'] = (
+                    assortiment_overvoorraad_analyse_2['voorraadtotaal'] / assortiment_overvoorraad_analyse_2[
+                'inkhvh']).round(1)
+
+        # Overvoorraad berekenen in verpakkingen en AIP
+        assortiment_overvoorraad_analyse_2['overvoorraad verp'] = assortiment_overvoorraad_analyse_2[
+                                                                      'voorraadtotaal verp'] - \
+                                                                  assortiment_overvoorraad_analyse_2[
+                                                                      'gem verp verstrekt per maand CGM']
+        assortiment_overvoorraad_analyse_2['overvoorraad aip'] = assortiment_overvoorraad_analyse_2[
+                                                                     'overvoorraad verp'] * \
+                                                                 assortiment_overvoorraad_analyse_2['inkprijs']
+
+        # Nu kun je het dataframe analyseren op een postitieve waarde van de overvoorraad
+        overvoorraad_filter_verpakkingen = (assortiment_overvoorraad_analyse_2['overvoorraad verp'] > 1)
+
+        # pas het filter toe
+        assortiment_overvoorraad_analyse_3 = assortiment_overvoorraad_analyse_2.loc[overvoorraad_filter_verpakkingen]
+
+        # maak de boel wat schoner door wat kolommen te droppen
+        assortiment_overvoorraad_analyse_4 = assortiment_overvoorraad_analyse_3[
+            ['produktgroep', 'zinummer', 'artikelnaam',
+             'inkhvh', 'eh', 'voorraadminimum', 'voorraadmaximum', 'locatie1',
+             'voorraadtotaal', 'voorraadtotaal verp', 'inkprijs', 'apotheek',
+             'Voorspelling', 'gem verp verstrekt per maand CGM'
+                , 'overvoorraad verp', 'overvoorraad aip']]
+
+        # sorteer het dataframe van hoog naar laag op basis van AIP overvoorraad
+        assortiment_overvoorraad_analyse_5 = assortiment_overvoorraad_analyse_4.sort_values(by=['overvoorraad aip'],
+                                                                                            ascending=False)
+
+        # nu moeten we nog weten waar we alles naartoe moeten verschepen.
+        # de eenheden die verstrekt kunnen worden naar andere apotheken (op basis van de laatste 2 maanden moeten worden weergegeven)
+
+        # ============================== VERSTREKKINGEN PER APOTHEEK VAN ALLE APOTHEKEN METEN ==================
+
+        verstrekkingen_ag = recept_ag.copy()
+
+        # maak van de datum een datetime kolom
+        verstrekkingen_ag['ddDatumRecept'] = pd.to_datetime(verstrekkingen_ag['ddDatumRecept'])
+
+        # filters voor exclusie (zorg, dienst, lsp, cf, distributie)
+        distributie_niet = (verstrekkingen_ag['ReceptHerkomst'] != 'D')
+        zorg_niet = (verstrekkingen_ag['ReceptHerkomst'] != 'Z')
+        dienst_niet = (verstrekkingen_ag['ReceptHerkomst'] != 'DIENST')
+        lsp_niet = (verstrekkingen_ag['sdMedewerkerCode'] != 'LSP')
+        cf_niet = (verstrekkingen_ag['cf'] != 'J')
+        cf_wel = (verstrekkingen_ag['cf'] == 'J')
+
+        # pas de filters toe op het dataframe
+
+        verstrekkingen_ag_1 = verstrekkingen_ag.loc[distributie_niet & zorg_niet & dienst_niet & lsp_niet & cf_niet]
+
+        # Bepaal de meetdatum voor de laatste 2 maanden
+        max_datum_verstrekkingen = verstrekkingen_ag_1['ddDatumRecept'].max()
+        datum_2_maanden_terug_verstrekkingen = max_datum_verstrekkingen - pd.DateOffset(months=2)
+
+        # pas het dataframe aan, aan het tijdframe dat je wilt bekijken
+        verstrekkingen_ag_2 = verstrekkingen_ag_1.loc[
+            verstrekkingen_ag_1['ddDatumRecept'] >= datum_2_maanden_terug_verstrekkingen]
+
+        # Tel nu de eenheden die verstrekt zijn in de ladekast van iedere apotheek apart en bereken hier ook een maandgemiddelde van
+
+        verstrekkingen_ag_3 = verstrekkingen_ag_2.groupby(by=['apotheek', 'ndATKODE', 'sdEtiketNaam'])[
+            'ndAantal'].sum().to_frame('eenheden verstrekt 2 mnd (CGM)').reset_index()
+
+        # maak nu een pivot table hiervan zodat je alle apotheken op een rijtje naast elkaar hebt.
+
+        verstrekkingen_ag_4 = verstrekkingen_ag_3.pivot_table(index=['ndATKODE', 'sdEtiketNaam'],
+                                                              columns='apotheek',
+                                                              values='eenheden verstrekt 2 mnd (CGM)').reset_index()
+
+        # nu moeten we voor alle kolommen genaamd hanzeplein, helpman, musselpark, oosterhaar, oosterpoort en wiljes een functie schrijven die alle NaN waarden omzet naar 0
+
+        for col in verstrekkingen_ag_4.columns[2:]:
+            verstrekkingen_ag_4[col] = verstrekkingen_ag_4[col].replace(np.nan, 0, regex=True)
+
+        # nu moeten we de dataframes gaan mergen zodat we een totoal overzicht kunnen maken voor de apotheek van de overvoorraad
+
+        assortiment_overvoorraad_analyse_6 = assortiment_overvoorraad_analyse_5.merge(verstrekkingen_ag_4[
+                                                                                          ['ndATKODE', 'hanzeplein',
+                                                                                           'oosterpoort', 'helpman',
+                                                                                           'wiljes', 'oosterhaar',
+                                                                                           'musselpark']], how='left',
+                                                                                      left_on='zinummer',
+                                                                                      right_on='ndATKODE').drop(
+            columns='ndATKODE')
+
+        # nu gaan we hier de CF verstrekkingen nog aan toevoegen
+
+        # nu alleen de CF verstrekkingen pakken
+        verstrekkingen_ag_5 = verstrekkingen_ag.loc[distributie_niet & zorg_niet & dienst_niet & lsp_niet & cf_wel]
+
+        verstrekkingen_ag_6 = verstrekkingen_ag_5.loc[
+            (verstrekkingen_ag_5['ddDatumRecept'] >= datum_2_maanden_terug_verstrekkingen)]
+
+        verstrekkingen_ag_7 = verstrekkingen_ag_6.loc[(verstrekkingen_ag_6['apotheek'] == Apotheek_analyse)]
+
+        verstrekkingen_ag_8 = verstrekkingen_ag_7.groupby(by=['ndATKODE', 'sdEtiketNaam'])['ndAantal'].sum().to_frame(
+            'eenheden verstrekt CF CGM apotheek analyse').reset_index()
+
+        cf_verstrekkingen_analyse_apotheek = verstrekkingen_ag_8
+
+        # nu mergen we alles tot een dataframe samenkomend dataframe
+
+        assortiment_overvoorraad_analyse_7 = assortiment_overvoorraad_analyse_6.merge(
+            cf_verstrekkingen_analyse_apotheek[['ndATKODE', 'eenheden verstrekt CF CGM apotheek analyse']], how='left',
+            left_on='zinummer', right_on='ndATKODE').drop(columns='ndATKODE')
+
+        # vanaf hier maken we er een dash ag grid van
+
+        # assortiment_overvoorraad_analyse_7.to_excel('overvoorraad_analyse.xlsx')
+
+        # ============================= OVERZICHT DATAFRAMES ============================
+        assortiment_overvoorraad_analyse_5  # Analyse van de overvoorraad in het assortiment van de geselecteerde apotheek
+        verstrekkingen_ag_4  # alle verstrekkingen uit de ladekast van artikelen uit alle apotheken (afgelopen 2 maanden)
+        assortiment_overvoorraad_analyse_6  # alle overvoorraad samen met alle ladekast verstrekkingen van alle apotheken
+        cf_verstrekkingen_analyse_apotheek  # alle CF verstrekkingen van de apotheek die bekeken wordt in de analyse
+        assortiment_overvoorraad_analyse_7  # het DEFINTIEVE DATAFRAME MET over voorraad: ladekast verstrekkingen en CF verstrekkingen
+        # ============================= OVERZICHT DATAFRAMES ============================
+
+        overvoorraad_excel = dcc.send_data_frame(assortiment_overvoorraad_analyse_7.to_excel('overvoorraad.xlsx', index=False))
+
+        return overvoorraad_excel
 
 if __name__ == '__main__':
     app.run_server(debug=True)
-
-
-
-
-
-
-
-
-
-
 
